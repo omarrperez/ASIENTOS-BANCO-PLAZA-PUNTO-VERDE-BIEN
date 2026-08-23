@@ -1,0 +1,6 @@
+{
+  "name": "Asientos Bancarios VE - Banco Plaza",
+  "description": "Generador y clasificador de asientos contables para estados de cuenta de Banco Plaza con exportación a Excel para sistemas contables venezolanos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
