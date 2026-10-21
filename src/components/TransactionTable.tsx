@@ -4,8 +4,9 @@ import {
   FileSpreadsheet, Eye, HelpCircle, ArrowUpDown, ChevronDown, Check
 } from 'lucide-react';
 import { AccountItem, Transaction, TransactionType } from '../types';
-import { formatVenezuelanMoney, parseAnyNumber } from '../services/parser';
+import { parseAnyNumber } from '../services/parser';
 import { classifyTransactionWithRules } from '../data/rules';
+import { collectTransactionIssues } from '../utils/validation';
 
 interface TransactionTableProps {
   transactions: Transaction[];
@@ -33,19 +34,27 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   bankAccountName,
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [filterType, setFilterType] = useState<'ALL' | 'NC' | 'ND' | 'UNCLASSIFIED'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'NC' | 'ND' | 'UNCLASSIFIED' | 'ISSUES'>('ALL');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchAccountSelect, setBatchAccountSelect] = useState<string>('');
 
-  // Filtrado de transacciones
+  const rowIssuesMap = useMemo(() => {
+    return Object.fromEntries(
+      transactions.map(tx => [tx.id, collectTransactionIssues(tx)])
+    ) as Record<string, ReturnType<typeof collectTransactionIssues>>;
+  }, [transactions]);
+
+  const issuesCount = useMemo(() => {
+    return transactions.filter(tx => rowIssuesMap[tx.id]?.length).length;
+  }, [transactions, rowIssuesMap]);
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter(tx => {
-      // Filtro por tipo o no clasificado
       if (filterType === 'NC' && tx.tipo !== 'NC') return false;
       if (filterType === 'ND' && tx.tipo !== 'ND') return false;
       if (filterType === 'UNCLASSIFIED' && tx.account !== 'SIN CLASIFICAR') return false;
+      if (filterType === 'ISSUES' && !rowIssuesMap[tx.id]?.length) return false;
 
-      // Filtro de búsqueda
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase();
         const inDesc = tx.description.toLowerCase().includes(query);
@@ -58,7 +67,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
 
       return true;
     });
-  }, [transactions, filterType, searchTerm]);
+  }, [transactions, filterType, searchTerm, rowIssuesMap]);
 
   const unclassifiedCount = useMemo(() => {
     return transactions.filter(t => t.account === 'SIN CLASIFICAR').length;
@@ -72,7 +81,6 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
     return transactions.filter(t => t.tipo === 'ND').length;
   }, [transactions]);
 
-  // Manejo de selección múltiple
   const handleToggleSelect = (id: string) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -136,8 +144,6 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
 
   return (
     <div className="bg-white border border-slate-100 rounded-3xl p-6 sm:p-7 shadow-sm my-6">
-      
-      {/* Encabezado y resumen de clasificación */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-5 border-b border-slate-100">
         <div>
           <div className="flex items-center gap-2.5">
@@ -156,12 +162,11 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
           </p>
         </div>
 
-        {/* Botones de acción principales Sleek */}
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={onOpenPreview}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all border border-slate-200 cursor-pointer shadow-2xs"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all border border-slate-200 cursor-pointer"
           >
             <Eye className="w-4 h-4 text-slate-500" />
             Vista Previa de Asientos
@@ -178,10 +183,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
         </div>
       </div>
 
-      {/* Barra de Filtros, Búsqueda y Acciones por Lote */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 mt-5 mb-4">
-        
-        {/* Chips de filtro */}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -232,9 +234,22 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               <span>⚠️ Sin Clasificar ({unclassifiedCount})</span>
             </button>
           )}
+
+          {issuesCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterType('ISSUES')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                filterType === 'ISSUES'
+                  ? 'bg-red-500 text-white shadow-xs'
+                  : 'bg-red-100/80 text-red-700 hover:bg-red-200/80 border border-red-200'
+              }`}
+            >
+              <span>Revisión ({issuesCount})</span>
+            </button>
+          )}
         </div>
 
-        {/* Buscador */}
         <div className="relative min-w-[240px]">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
@@ -242,13 +257,11 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar por descripción, ref, monto..."
-            className="w-full text-xs pl-8 pr-3 py-2 bg-[#FDFBF7] border border-slate-200 rounded-full outline-none focus:bg-white focus:border-[#4B7C32] focus:ring-2 focus:ring-[#CDEAC0]/40 transition-all text-slate-700"
+            className="w-full text-xs pl-8 pr-3 py-2 bg-[#FDFBF7] border border-slate-200 rounded-full outline-none focus:bg-white focus:border-[#4B7C32] focus:ring-2 focus:ring-[#CDEAC0]/40 transition-all"
           />
         </div>
-
       </div>
 
-      {/* Barra de Acciones por Lote (cuando hay selección) */}
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-[#E0F2F1] border border-white rounded-2xl mb-4 text-xs shadow-xs">
           <div className="flex items-center gap-2 text-[#4B7C32] font-bold">
@@ -289,11 +302,8 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
         </div>
       )}
 
-      {/* TABLA DE MOVIMIENTOS */}
       <div className="overflow-x-auto rounded-2xl border border-slate-100 shadow-2xs max-h-[560px] overflow-y-auto">
         <table className="w-full text-left text-xs border-collapse">
-          
-          {/* Encabezado fijo de tabla */}
           <thead className="bg-[#FDFBF7] sticky top-0 z-10 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
             <tr>
               <th className="p-3.5 w-10 text-center">
@@ -327,19 +337,25 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               const isSelected = selectedIds.has(tx.id);
               const isUnclassified = tx.account === 'SIN CLASIFICAR';
               const isNC = tx.tipo === 'NC';
+              const txIssues = rowIssuesMap[tx.id] ?? [];
+              const hasIssues = txIssues.length > 0;
+              const hasError = txIssues.some(issue => issue.severity === 'error');
 
               return (
                 <tr
                   key={tx.id}
                   className={`transition-colors ${
-                    isUnclassified
+                    hasError
+                      ? 'bg-red-50/80 hover:bg-red-100/70'
+                      : hasIssues
+                      ? 'bg-amber-50/80 hover:bg-amber-100/70'
+                      : isUnclassified
                       ? 'bg-amber-50/70 hover:bg-amber-100/60'
                       : isSelected
                       ? 'bg-[#CDEAC0]/25'
                       : 'hover:bg-slate-50'
                   }`}
                 >
-                  {/* Checkbox */}
                   <td className="p-3 text-center">
                     <input
                       type="checkbox"
@@ -349,22 +365,19 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     />
                   </td>
 
-                  {/* Número */}
                   <td className="p-3 font-mono text-[11px] text-slate-400">
                     {idx + 1}
                   </td>
 
-                  {/* Fecha */}
                   <td className="p-3">
                     <input
                       type="text"
                       value={tx.date}
                       onChange={(e) => onUpdateTransaction(tx.id, { date: e.target.value })}
-                      className="w-full font-mono text-xs p-1 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-[#4B7C32] rounded-lg outline-none transition-all"
+                      className="w-full font-mono text-xs p-1 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-[#4B7C32] rounded-lg outline-none"
                     />
                   </td>
 
-                  {/* Descripción */}
                   <td className="p-3">
                     <input
                       type="text"
@@ -380,21 +393,19 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                           regla: tx.isManual ? tx.regla : cls.regla
                         });
                       }}
-                      className="w-full text-xs font-semibold p-1 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-[#4B7C32] rounded-lg outline-none transition-all text-slate-800"
+                      className="w-full text-xs font-semibold p-1 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-[#4B7C32] rounded-lg outline-none"
                     />
                   </td>
 
-                  {/* Referencia */}
                   <td className="p-3">
                     <input
                       type="text"
                       value={tx.reference}
                       onChange={(e) => onUpdateTransaction(tx.id, { reference: e.target.value })}
-                      className="w-full font-mono text-xs text-slate-600 p-1 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-[#4B7C32] rounded-lg outline-none transition-all"
+                      className="w-full font-mono text-xs text-slate-600 p-1 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-[#4B7C32] rounded-lg outline-none"
                     />
                   </td>
 
-                  {/* Monto */}
                   <td className="p-3 text-right">
                     <input
                       type="text"
@@ -405,13 +416,12 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                           (e.target as HTMLInputElement).blur();
                         }
                       }}
-                      className={`w-full font-mono text-xs font-bold text-right p-1 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-[#4B7C32] rounded-lg outline-none transition-all ${
+                      className={`w-full font-mono text-xs font-bold text-right p-1 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-[#4B7C32] rounded-lg outline-none ${
                         isNC ? 'text-emerald-700 font-black' : 'text-rose-600 font-black'
                       }`}
                     />
                   </td>
 
-                  {/* Tipo (NC / ND) */}
                   <td className="p-3 text-center">
                     <span
                       className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-mono font-black ${
@@ -425,7 +435,6 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     </span>
                   </td>
 
-                  {/* Cuenta Contable Dropdown */}
                   <td className="p-3">
                     <select
                       value={tx.account}
@@ -444,17 +453,35 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     </select>
                   </td>
 
-                  {/* Motivo / Regla */}
                   <td className="p-3">
-                    <div
-                      className="text-[11px] text-slate-500 truncate max-w-[220px]"
-                      title={tx.motivo || tx.regla}
-                    >
-                      <span className="font-semibold text-slate-700">{tx.regla}:</span> {tx.motivo}
+                    <div className="flex flex-col gap-1.5">
+                      <div
+                        className="text-[11px] text-slate-500 truncate max-w-[220px]"
+                        title={tx.motivo || tx.regla}
+                      >
+                        <span className="font-semibold text-slate-700">{tx.regla}:</span> {tx.motivo}
+                      </div>
+
+                      {hasIssues && (
+                        <div className="flex flex-wrap gap-1">
+                          {txIssues.slice(0, 2).map(issue => (
+                            <span
+                              key={issue.kind}
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
+                                issue.severity === 'error'
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                              title={issue.message}
+                            >
+                              {issue.severity === 'error' ? 'ERR' : 'WARN'}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </td>
 
-                  {/* Acciones */}
                   <td className="p-3 text-center">
                     <button
                       type="button"
@@ -465,16 +492,13 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </td>
-
                 </tr>
               );
             })}
           </tbody>
-
         </table>
       </div>
 
-      {/* Resumen del pie de tabla */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-5 pt-4 border-t border-slate-100 text-xs text-slate-400">
         <div>
           Mostrando <span className="font-bold text-slate-700">{filteredTransactions.length}</span> de <span className="font-bold text-slate-700">{transactions.length}</span> movimientos.
@@ -486,7 +510,6 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
           </span>
         </div>
       </div>
-
     </div>
   );
 };
