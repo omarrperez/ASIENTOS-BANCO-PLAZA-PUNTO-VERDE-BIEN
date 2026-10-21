@@ -9,6 +9,7 @@ import { PlanCuentasModal } from './components/PlanCuentasModal';
 import { BankConfig, Transaction, AccountItem } from './types';
 import { DEFAULT_PLAN_CUENTAS, classifyTransactionWithRules } from './data/rules';
 import { exportTransactionsToExcel } from './services/excelExport';
+import { getIssueSummary } from './utils/validation';
 import { ShieldCheck, Sparkles, FileSpreadsheet, ArrowRight, Layers } from 'lucide-react';
 
 const STORAGE_KEY_CONFIG = 'asientos_ve_bank_config';
@@ -60,6 +61,8 @@ export default function App() {
   const [isPlanCuentasOpen, setIsPlanCuentasOpen] = useState<boolean>(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
   const [isFilteringUnclassified, setIsFilteringUnclassified] = useState<boolean>(false);
+
+  const issueSummary = useMemo(() => getIssueSummary(transactions), [transactions]);
 
   // Guardar configuración en localStorage
   useEffect(() => {
@@ -182,10 +185,18 @@ export default function App() {
   };
 
   const handleGenerateExcel = () => {
+    if (issueSummary.blockingCount > 0) {
+      setStatusMessage({
+        text: `No se puede exportar aún. Hay ${issueSummary.blockingCount} movimiento(s) con errores críticos que requieren revisión antes de generar Excel.`,
+        type: 'warning'
+      });
+      return;
+    }
+
     try {
       const result = exportTransactionsToExcel(transactions, config);
       setStatusMessage({
-        text: `¡Excel generado exitosamente! Archivo "${result.fileName}" descargado con 3 hojas: Hoja 1 (Todos), Hoja 2 (NC con total) y Hoja 3 (ND con contrapartida Banco Plaza).`,
+        text: `¡Excel generado exitosamente! Archivo "${result.fileName}" descargado con 2 hojas: Créditos y Débitos.`,
         type: 'success'
       });
     } catch (err: unknown) {
@@ -199,7 +210,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FDFBF7] text-slate-700 font-sans">
-      
+
       {/* Encabezado Superior */}
       <Header
         config={config}
@@ -211,7 +222,7 @@ export default function App() {
 
       {/* Contenedor Principal */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
-        
+
         {/* Banner Informativo Contable Estilo Sleek */}
         <div className="bg-[#E0F2F1] border border-white rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
           <div className="flex items-start gap-4">
@@ -223,7 +234,7 @@ export default function App() {
                 Asientos de Banco Plaza listos para tu Sistema Contable
               </h2>
               <p className="text-xs text-slate-600 mt-0.5 max-w-3xl leading-relaxed">
-                El sistema clasifica débitos y créditos con las reglas oficiales de Banco Plaza (POS, C2P, Seniat, Socios, Comisiones y Timbres). Al exportar, genera automáticamente las <strong>3 hojas contables con contrapartidas</strong> para garantizar la partida doble.
+                El sistema clasifica débitos y créditos con las reglas oficiales de Banco Plaza (POS, C2P, Seniat, Socios, Comisiones y Timbres). Al exportar, genera automáticamente las hojas contables.
               </p>
             </div>
           </div>
@@ -234,6 +245,20 @@ export default function App() {
             </span>
           </div>
         </div>
+
+        {transactions.length > 0 && issueSummary.total > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
+            <div className="font-semibold">
+              Revisión requerida: {issueSummary.total} problema(s) detectado(s) en {issueSummary.blockingCount} movimiento(s) crítico(s).
+            </div>
+            <div className="flex flex-wrap gap-2 text-[11px]">
+              {issueSummary.byKind['empty-description'] > 0 && <span>Descripción vacía: {issueSummary.byKind['empty-description']}</span>}
+              {issueSummary.byKind['invalid-date'] > 0 && <span>Fecha inválida: {issueSummary.byKind['invalid-date']}</span>}
+              {issueSummary.byKind['zero-amount'] > 0 && <span>Monto inválido: {issueSummary.byKind['zero-amount']}</span>}
+              {issueSummary.byKind.unclassified > 0 && <span>Sin clasificar: {issueSummary.byKind.unclassified}</span>}
+            </div>
+          </div>
+        )}
 
         {/* Sección 1: Carga y Procesamiento */}
         <UploadSection
@@ -312,11 +337,9 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium mr-2">
-              <span>Hoja 1: Todos</span>
+              <span>Hoja 1: Créditos</span>
               <span>·</span>
-              <span>Hoja 2: NC + Cuadre</span>
-              <span>·</span>
-              <span>Hoja 3: ND + Espejo</span>
+              <span>Hoja 2: Débitos</span>
             </div>
             <div className="flex gap-2">
               <div className="w-2.5 h-2.5 bg-[#FFD1DC] rounded-full" title="Débitos / Cargos"></div>
