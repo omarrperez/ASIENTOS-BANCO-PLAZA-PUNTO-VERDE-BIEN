@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  Search, Filter, CheckSquare, Square, Trash2, Edit3, 
-  FileSpreadsheet, Eye, HelpCircle, ArrowUpDown, ChevronDown, Check
-} from 'lucide-react';
+import { Search, CheckSquare, Square, Trash2, FileSpreadsheet, Eye } from 'lucide-react';
 import { AccountItem, Transaction, TransactionType } from '../types';
 import { parseAnyNumber } from '../services/parser';
 import { classifyTransactionWithRules } from '../data/rules';
-import { collectTransactionIssues } from '../utils/validation';
+import {
+  collectTransactionIssues,
+  getTransactionReviewState,
+  TransactionReviewState
+} from '../utils/validation';
 
 interface TransactionTableProps {
   transactions: Transaction[];
@@ -34,7 +35,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   bankAccountName,
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [filterType, setFilterType] = useState<'ALL' | 'NC' | 'ND' | 'UNCLASSIFIED' | 'ISSUES'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'NC' | 'ND' | 'UNCLASSIFIED' | 'ISSUES' | TransactionReviewState>('ALL');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchAccountSelect, setBatchAccountSelect] = useState<string>('');
 
@@ -42,6 +43,17 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
     return Object.fromEntries(
       transactions.map(tx => [tx.id, collectTransactionIssues(tx)])
     ) as Record<string, ReturnType<typeof collectTransactionIssues>>;
+  }, [transactions]);
+
+  const reviewCounts = useMemo(() => {
+    const counts = { ok: 0, warning: 0, error: 0 };
+    transactions.forEach(tx => {
+      const state = getTransactionReviewState(tx);
+      if (state === 'ok') counts.ok += 1;
+      if (state === 'warning') counts.warning += 1;
+      if (state === 'error') counts.error += 1;
+    });
+    return counts;
   }, [transactions]);
 
   const issuesCount = useMemo(() => {
@@ -54,6 +66,9 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
       if (filterType === 'ND' && tx.tipo !== 'ND') return false;
       if (filterType === 'UNCLASSIFIED' && tx.account !== 'SIN CLASIFICAR') return false;
       if (filterType === 'ISSUES' && !rowIssuesMap[tx.id]?.length) return false;
+      if (filterType === 'ok' && getTransactionReviewState(tx) !== 'ok') return false;
+      if (filterType === 'warning' && getTransactionReviewState(tx) !== 'warning') return false;
+      if (filterType === 'error' && getTransactionReviewState(tx) !== 'error') return false;
 
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase();
@@ -80,6 +95,34 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   const ndCount = useMemo(() => {
     return transactions.filter(t => t.tipo === 'ND').length;
   }, [transactions]);
+
+  const getStateBadge = (state: TransactionReviewState, issues: ReturnType<typeof collectTransactionIssues>) => {
+    const title = issues.length
+      ? issues.map(issue => issue.message).join(' • ')
+      : 'Sin problemas detectados';
+
+    if (state === 'error') {
+      return {
+        label: 'ERROR',
+        className: 'bg-red-100 text-red-700 border border-red-200',
+        title
+      };
+    }
+
+    if (state === 'warning') {
+      return {
+        label: 'AVISO',
+        className: 'bg-amber-100 text-amber-800 border border-amber-200',
+        title
+      };
+    }
+
+    return {
+      label: 'OK',
+      className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      title
+    };
+  };
 
   const handleToggleSelect = (id: string) => {
     const next = new Set(selectedIds);
@@ -114,10 +157,10 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   const handleAmountChange = (tx: Transaction, rawValue: string) => {
     const n = parseAnyNumber(rawValue);
     if (n === null) return;
-    
+
     const newTipo: TransactionType = n >= 0 ? 'NC' : 'ND';
     const cls = classifyTransactionWithRules(tx.description, n, bankAccountCode, bankAccountName);
-    
+
     onUpdateTransaction(tx.id, {
       amount: n,
       tipo: newTipo,
@@ -248,6 +291,48 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               <span>Revisión ({issuesCount})</span>
             </button>
           )}
+
+          {reviewCounts.error > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterType('error')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                filterType === 'error'
+                  ? 'bg-red-600 text-white shadow-xs'
+                  : 'bg-red-100/80 text-red-700 hover:bg-red-200/80 border border-red-200'
+              }`}
+            >
+              Errores ({reviewCounts.error})
+            </button>
+          )}
+
+          {reviewCounts.warning > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterType('warning')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                filterType === 'warning'
+                  ? 'bg-amber-500 text-white shadow-xs'
+                  : 'bg-amber-100/80 text-amber-800 hover:bg-amber-200/80 border border-amber-200'
+              }`}
+            >
+              Avisos ({reviewCounts.warning})
+            </button>
+          )}
+
+          {reviewCounts.ok > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterType('ok')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                filterType === 'ok'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-emerald-100/80 text-emerald-700 hover:bg-emerald-200/80 border border-emerald-200'
+              }`}
+            >
+              OK ({reviewCounts.ok})
+            </button>
+          )}
         </div>
 
         <div className="relative min-w-[240px]">
@@ -326,6 +411,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               <th className="p-3.5 w-28">Referencia</th>
               <th className="p-3.5 w-32 text-right">Monto (Bs.)</th>
               <th className="p-3.5 w-16 text-center">Tipo</th>
+              <th className="p-3.5 w-24 text-center">Estado</th>
               <th className="p-3.5 min-w-[260px]">Cuenta Contable (VEN-NIF)</th>
               <th className="p-3.5 min-w-[180px]">Regla / Motivo</th>
               <th className="p-3.5 w-12 text-center"></th>
@@ -340,14 +426,16 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               const txIssues = rowIssuesMap[tx.id] ?? [];
               const hasIssues = txIssues.length > 0;
               const hasError = txIssues.some(issue => issue.severity === 'error');
+              const reviewState = getTransactionReviewState(tx);
+              const stateBadge = getStateBadge(reviewState, txIssues);
 
               return (
                 <tr
                   key={tx.id}
                   className={`transition-colors ${
-                    hasError
+                    reviewState === 'error'
                       ? 'bg-red-50/80 hover:bg-red-100/70'
-                      : hasIssues
+                      : reviewState === 'warning'
                       ? 'bg-amber-50/80 hover:bg-amber-100/70'
                       : isUnclassified
                       ? 'bg-amber-50/70 hover:bg-amber-100/60'
@@ -432,6 +520,15 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                       title={isNC ? 'Crédito / Abono bancario (+)' : 'Débito / Cargo bancario (-)'}
                     >
                       {tx.tipo}
+                    </span>
+                  </td>
+
+                  <td className="p-3 text-center">
+                    <span
+                      title={stateBadge.title}
+                      className={`inline-flex items-center justify-center min-w-[62px] px-2.5 py-1 rounded-full text-[9px] font-black ${stateBadge.className}`}
+                    >
+                      {stateBadge.label}
                     </span>
                   </td>
 
