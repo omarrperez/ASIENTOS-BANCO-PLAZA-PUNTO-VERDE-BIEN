@@ -8,6 +8,8 @@ export type TransactionIssueKind =
   | 'unclassified'
   | 'type-mismatch';
 
+export type TransactionReviewState = 'ok' | 'warning' | 'error';
+
 export interface TransactionIssue {
   kind: TransactionIssueKind;
   message: string;
@@ -46,6 +48,13 @@ export function collectTransactionIssues(tx: Partial<Transaction>): TransactionI
   }
 
   return issues;
+}
+
+export function getTransactionReviewState(tx: Partial<Transaction>): TransactionReviewState {
+  const issues = collectTransactionIssues(tx);
+  if (issues.some(issue => issue.severity === 'error')) return 'error';
+  if (issues.length > 0) return 'warning';
+  return 'ok';
 }
 
 export function getIssueSummary(transactions: Transaction[]) {
